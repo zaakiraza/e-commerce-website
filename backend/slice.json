@@ -1,0 +1,51 @@
+{
+  "operationIds": [
+    "auth_login",
+    "auth_logout",
+    "admin_orders_list",
+    "admin_orders_get",
+    "admin_orders_update_status",
+    "admin_products_list",
+    "admin_products_create",
+    "admin_products_get",
+    "admin_products_delete",
+    "admin_products_update",
+    "cart_get",
+    "cart_items_add",
+    "cart_items_remove",
+    "cart_items_update",
+    "products_list",
+    "products_get",
+    "orders_list_mine",
+    "orders_create",
+    "orders_get_mine"
+  ],
+  "tags": [
+    "auth",
+    "admin-orders",
+    "admin-products",
+    "cart",
+    "catalog",
+    "orders"
+  ],
+  "screenIds": [
+    "SCREEN-008",
+    "SCREEN-011",
+    "SCREEN-012",
+    "SCREEN-009",
+    "SCREEN-010",
+    "SCREEN-002",
+    "SCREEN-003",
+    "SCREEN-004",
+    "SCREEN-CREATE",
+    "SCREEN-001",
+    "SCREEN-005",
+    "SCREEN-006",
+    "SCREEN-007",
+    "SCREEN-403",
+    "SCREEN-404",
+    "SCREEN-OFFLINE"
+  ],
+  "sliceId": "slice-01-full",
+  "buildRunId": "build-363f2df2-5007-4df4-a85f-ccc47eed4ce6"
+}

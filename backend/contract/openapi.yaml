@@ -1,0 +1,1149 @@
+openapi: 3.1.0
+info:
+  title: E-Commerce Website API
+  version: 1.0.0
+  description: |
+    Storefront and admin API for a Cash-on-Delivery e-commerce application.
+
+    Covers catalog browsing/search, product detail, guest/user carts, checkout
+    with delivery information, customer order history, authentication
+    (email/password, bearer JWT), admin product CRUD, and admin order status
+    management.
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+tags:
+  - name: catalog
+    description: Public product browsing and search
+  - name: cart
+    description: Guest and authenticated shopping carts
+  - name: auth
+    description: Sign-in and sign-out
+  - name: orders
+    description: Customer order placement and history
+  - name: admin-products
+    description: Admin product catalog management
+  - name: admin-orders
+    description: Admin order viewing and status management
+paths:
+  /products:
+    get:
+      operationId: products_list
+      tags:
+        - catalog
+      summary: List sellable products (catalog home and search)
+      description: |
+        Returns active products for the storefront catalog. Supports a
+        case-insensitive product-name-contains search via the `q` query
+        parameter, so catalog home and search results share this endpoint.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match on product name.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Product list (may be empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductSummary"
+              examples:
+                catalog:
+                  value:
+                    - id: ckx1p2q3r4
+                      name: Wireless Mouse
+                      price: 19.99
+                      primaryImage: https://cdn.example.com/mouse-1.jpg
+                      inStock: true
+                empty:
+                  value: []
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /products/{id}:
+    get:
+      operationId: products_get
+      tags:
+        - catalog
+      summary: Get full product detail
+      description: Public product detail including description, image gallery, price, and availability.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Full product detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+              examples:
+                in_stock:
+                  value:
+                    id: ckx1p2q3r4
+                    name: Wireless Mouse
+                    description: Ergonomic 2.4GHz wireless mouse.
+                    price: 19.99
+                    images:
+                      - https://cdn.example.com/mouse-1.jpg
+                      - https://cdn.example.com/mouse-2.jpg
+                    inStock: true
+                    stockQuantity: 42
+        "404":
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                not_found:
+                  value:
+                    message: Product not found
+  /cart:
+    get:
+      operationId: cart_get
+      tags:
+        - cart
+      summary: Get the current cart
+      description: |
+        Returns the caller's cart. Works for guests (session cart, cookie or
+        session-scoped) and for signed-in users (their persisted cart). Merging
+        a guest cart on sign-in is handled server-side.
+      security: []
+      responses:
+        "200":
+          description: Current cart with line totals and total.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+  /cart/items:
+    post:
+      operationId: cart_items_add
+      tags:
+        - cart
+      summary: Add a product to the cart
+      description: |
+        Adds a product to the current cart. If the product is already in the
+        cart, the existing line's quantity is incremented instead of creating
+        a duplicate line. Rejects out-of-stock products and quantities that
+        would exceed available stock.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - productId
+              properties:
+                productId:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                  default: 1
+            examples:
+              default_qty:
+                value:
+                  productId: ckx1p2q3r4
+              explicit_qty:
+                value:
+                  productId: ckx1p2q3r4
+                  quantity: 2
+      responses:
+        "200":
+          description: Updated cart.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Stock conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                out_of_stock:
+                  value:
+                    message: Out of stock
+                only_n_available:
+                  value:
+                    message: Only 3 available.
+  /cart/items/{id}:
+    patch:
+      operationId: cart_items_update
+      tags:
+        - cart
+      summary: Update a cart item quantity
+      description: |
+        Sets a cart line's quantity. Returns 409 with "Only {n} available."
+        and keeps the previous quantity when the requested quantity exceeds stock.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - quantity
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+            examples:
+              set_qty:
+                value:
+                  quantity: 3
+      responses:
+        "200":
+          description: Updated cart with recalculated totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "404":
+          description: Cart item not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Requested quantity exceeds available stock.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                only_n_available:
+                  value:
+                    message: Only 2 available.
+    delete:
+      operationId: cart_items_remove
+      tags:
+        - cart
+      summary: Remove a cart item
+      description: Removes the line item and returns the cart with recalculated totals.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cart with the item removed and totals recalculated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "404":
+          description: Cart item not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/login:
+    post:
+      operationId: auth_login
+      tags:
+        - auth
+      summary: Sign in with email and password
+      description: |
+        Authenticates a Customer or Admin and returns a bearer JWT plus the
+        signed-in user. A guest cart is merged into the user's cart on sign-in.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+            examples:
+              credentials:
+                value:
+                  email: jane@example.com
+                  password: s3cret!
+      responses:
+        "200":
+          description: Signed in; token for subsequent authenticated calls.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                invalid:
+                  value:
+                    message: Invalid email or password
+  /auth/logout:
+    post:
+      operationId: auth_logout
+      tags:
+        - auth
+      summary: Sign out
+      description: Invalidates the current session/token server-side.
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Signed out.
+  /orders:
+    post:
+      operationId: orders_create
+      tags:
+        - orders
+      summary: Place a Cash-on-Delivery order
+      description: |
+        Creates an order from the caller's cart with status `pending`,
+        snapshots item names and prices, decrements product stock, and clears
+        the cart. Stock is re-checked at placement; insufficient stock rejects
+        the order and preserves the cart. Admins are blocked from placing
+        storefront orders.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryInfo"
+            examples:
+              delivery:
+                value:
+                  deliveryFullName: Jane Doe
+                  deliveryPhone: "5551234567"
+                  deliveryStreet: 12 Main St
+                  deliveryCity: Springfield
+                  deliveryPostalCode: "12345"
+      responses:
+        "201":
+          description: Order created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Admins may not place storefront orders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Insufficient stock at placement; cart preserved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                insufficient_stock:
+                  value:
+                    message: Only 2 available for Wireless Mouse. Please adjust your cart.
+    get:
+      operationId: orders_list_mine
+      tags:
+        - orders
+      summary: List the signed-in customer's own orders
+      description: |
+        Returns only orders belonging to the authenticated customer
+        (admins placing storefront calls do not use this endpoint).
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The customer's order summaries (may be empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /orders/{id}:
+    get:
+      operationId: orders_get_mine
+      tags:
+        - orders
+      summary: Get one of the customer's own orders in full
+      description: |
+        Full order detail with lines and delivery info. Orders owned by other
+        customers return 404 "Order not found" without revealing existence.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: Full order detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Order not found or not owned by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                not_found:
+                  value:
+                    message: Order not found
+  /admin/products:
+    get:
+      operationId: admin_products_list
+      tags:
+        - admin-products
+      summary: List all products (admin)
+      description: All products with full fields, including stock and isActive.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All products.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminProduct"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: admin_products_create
+      tags:
+        - admin-products
+      summary: Create a product (admin)
+      description: |
+        Creates a product. Validation errors are returned per field
+        ("Name is required.", "Price must be greater than 0.",
+        "Stock cannot be negative."). Images are provided as URLs.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateInput"
+            examples:
+              valid:
+                value:
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse.
+                  price: 19.99
+                  stockQuantity: 42
+                  images:
+                    - https://cdn.example.com/mouse-1.jpg
+      responses:
+        "201":
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/products/{id}:
+    get:
+      operationId: admin_products_get
+      tags:
+        - admin-products
+      summary: Get a product (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Product with all fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProduct"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProductNotFound"
+    patch:
+      operationId: admin_products_update
+      tags:
+        - admin-products
+      summary: Update a product (admin)
+      description: Partial update; any subset of editable fields may be sent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateInput"
+            examples:
+              price_and_stock:
+                value:
+                  price: 17.99
+                  stockQuantity: 10
+      responses:
+        "200":
+          description: Updated product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProductNotFound"
+    delete:
+      operationId: admin_products_delete
+      tags:
+        - admin-products
+      summary: Delete (deactivate) a product (admin)
+      description: |
+        Removes the product from the catalog. Existing orders retain their
+        name/price snapshots and remain viewable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "204":
+          description: Product deactivated; orders unaffected.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProductNotFound"
+  /admin/orders:
+    get:
+      operationId: admin_orders_list
+      tags:
+        - admin-orders
+      summary: List all orders (admin)
+      description: All customer orders with customer name, date, total, and status.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Order summaries (may be empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminOrderSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/orders/{id}:
+    get:
+      operationId: admin_orders_get
+      tags:
+        - admin-orders
+      summary: Get an order in full (admin)
+      description: Order detail with lines, customer, and delivery info.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: Full order detail with customer info.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOrderDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+  /admin/orders/{id}/status:
+    patch:
+      operationId: admin_orders_update_status
+      tags:
+        - admin-orders
+      summary: Update an order's status (admin)
+      description: |
+        Status moves forward only: pending → confirmed → shipped → delivered.
+        Cancellation is allowed from pending or confirmed and restores stock.
+        Reversals are rejected with 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - confirmed
+                    - shipped
+                    - delivered
+                    - cancelled
+            examples:
+              confirm:
+                value:
+                  status: confirmed
+              cancel:
+                value:
+                  status: cancelled
+      responses:
+        "200":
+          description: New status saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    $ref: "#/components/schemas/OrderStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          description: Invalid status transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                invalid_transition:
+                  value:
+                    message: This status change is not allowed.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      description: Product identifier.
+      schema:
+        type: string
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order identifier.
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Validation error(s); field-level messages.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid authentication.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Non-admin attempted an admin operation ("Unauthorized").
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            unauthorized:
+              value:
+                message: Unauthorized
+    ProductNotFound:
+      description: Product not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            not_found:
+              value:
+                message: Product not found
+    OrderNotFound:
+      description: Order not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            not_found:
+              value:
+                message: Order not found
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Plain-language error sentence.
+        errors:
+          type: object
+          description: Optional map of field name to field-level error message.
+          additionalProperties:
+            type: string
+    ProductSummary:
+      type: object
+      description: Catalog listing item.
+      required:
+        - id
+        - name
+        - price
+        - primaryImage
+        - inStock
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        price:
+          type: number
+          format: double
+        primaryImage:
+          type:
+            - string
+            - "null"
+          description: First image URL, or null if the product has no images.
+        inStock:
+          type: boolean
+    ProductDetail:
+      type: object
+      description: Full public product detail.
+      required:
+        - id
+        - name
+        - price
+        - images
+        - inStock
+        - stockQuantity
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        price:
+          type: number
+          format: double
+        images:
+          type: array
+          items:
+            type: string
+        inStock:
+          type: boolean
+        stockQuantity:
+          type: integer
+    AdminProduct:
+      type: object
+      description: Product as seen by admins, including stock and availability.
+      required:
+        - id
+        - name
+        - price
+        - stockQuantity
+        - images
+        - isActive
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        price:
+          type: number
+          format: double
+        stockQuantity:
+          type: integer
+        images:
+          type: array
+          items:
+            type: string
+        isActive:
+          type: boolean
+    ProductCreateInput:
+      type: object
+      required:
+        - name
+        - price
+        - stockQuantity
+        - images
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+        stockQuantity:
+          type: integer
+          minimum: 0
+        images:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            description: Image URL.
+    ProductUpdateInput:
+      type: object
+      description: Any subset of editable product fields.
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+        stockQuantity:
+          type: integer
+          minimum: 0
+        images:
+          type: array
+          items:
+            type: string
+    Cart:
+      type: object
+      required:
+        - items
+        - total
+      properties:
+        id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CartItem"
+        total:
+          type: number
+          format: double
+    CartItem:
+      type: object
+      required:
+        - id
+        - product
+        - quantity
+        - lineTotal
+      properties:
+        id:
+          type: string
+        product:
+          $ref: "#/components/schemas/ProductSummary"
+        quantity:
+          type: integer
+          minimum: 1
+        lineTotal:
+          type: number
+          format: double
+    LoginResponse:
+      type: object
+      required:
+        - accessToken
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: Bearer JWT for authenticated calls.
+        token:
+          type: string
+          description: Alias of accessToken, retained for spec compatibility.
+        user:
+          type: object
+          required:
+            - id
+            - email
+            - role
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+              format: email
+            role:
+              type: string
+              enum:
+                - user
+                - admin
+    DeliveryInfo:
+      type: object
+      required:
+        - deliveryFullName
+        - deliveryPhone
+        - deliveryStreet
+        - deliveryCity
+        - deliveryPostalCode
+      properties:
+        deliveryFullName:
+          type: string
+          minLength: 1
+        deliveryPhone:
+          type: string
+          minLength: 1
+          description: Required, non-empty; no strict format enforced.
+        deliveryStreet:
+          type: string
+          minLength: 1
+        deliveryCity:
+          type: string
+          minLength: 1
+        deliveryPostalCode:
+          type: string
+          minLength: 1
+    OrderStatus:
+      type: string
+      enum:
+        - pending
+        - confirmed
+        - shipped
+        - delivered
+        - cancelled
+    OrderCreated:
+      type: object
+      required:
+        - id
+        - orderNumber
+        - status
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+    OrderSummary:
+      type: object
+      description: Customer-facing order summary row.
+      required:
+        - id
+        - orderNumber
+        - placedAt
+        - total
+        - status
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        placedAt:
+          type: string
+          format: date-time
+        total:
+          type: number
+          format: double
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+    OrderDetail:
+      type: object
+      description: Customer-facing full order detail.
+      required:
+        - id
+        - orderNumber
+        - placedAt
+        - status
+        - paymentMethod
+        - total
+        - lines
+        - deliveryFullName
+        - deliveryPhone
+        - deliveryStreet
+        - deliveryCity
+        - deliveryPostalCode
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        placedAt:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        paymentMethod:
+          type: string
+          enum:
+            - cash_on_delivery
+        total:
+          type: number
+          format: double
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLine"
+        deliveryFullName:
+          type: string
+        deliveryPhone:
+          type: string
+        deliveryStreet:
+          type: string
+        deliveryCity:
+          type: string
+        deliveryPostalCode:
+          type: string
+    OrderLine:
+      type: object
+      description: Snapshotted order line; survives product edits and deletion.
+      required:
+        - id
+        - productNameSnapshot
+        - unitPriceSnapshot
+        - quantity
+        - lineTotal
+      properties:
+        id:
+          type: string
+        productId:
+          type:
+            - string
+            - "null"
+          description: Null when the product has been deleted.
+        productNameSnapshot:
+          type: string
+        unitPriceSnapshot:
+          type: number
+          format: double
+        quantity:
+          type: integer
+          minimum: 1
+        lineTotal:
+          type: number
+          format: double
+    AdminOrderSummary:
+      type: object
+      required:
+        - id
+        - orderNumber
+        - customerName
+        - placedAt
+        - total
+        - status
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        customerName:
+          type: string
+        placedAt:
+          type: string
+          format: date-time
+        total:
+          type: number
+          format: double
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+    AdminOrderDetail:
+      allOf:
+        - $ref: "#/components/schemas/OrderDetail"
+        - type: object
+          required:
+            - customer
+          properties:
+            customer:
+              type: object
+              required:
+                - id
+                - email
+                - fullName
+              properties:
+                id:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                fullName:
+                  type: string

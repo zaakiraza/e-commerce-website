@@ -1,0 +1,22 @@
+/** The OpenAPI operations the UI may call — one named re-export per operationId. */
+export {
+  admin_orders_get,
+  admin_orders_list,
+  admin_orders_update_status,
+  admin_products_create,
+  admin_products_delete,
+  admin_products_get,
+  admin_products_list,
+  admin_products_update,
+  auth_login,
+  auth_logout,
+  cart_get,
+  cart_items_add,
+  cart_items_remove,
+  cart_items_update,
+  orders_create,
+  orders_get_mine,
+  orders_list_mine,
+  products_get,
+  products_list,
+} from "./generated/live-api";
